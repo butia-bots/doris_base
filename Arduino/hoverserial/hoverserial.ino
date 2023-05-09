@@ -11,8 +11,6 @@
 //   it is recommended to use the built-in Serial interface for full speed perfomace.
 // • The data packaging includes a Start Frame, checksum, and re-syncronization capability for reliable communication
 // 
-// The code starts with zero speed and moves towards +
-//
 // CONFIGURATION on the hoverboard side in config.h:
 // • Option 1: Serial on Right Sensor cable (short wired cable) - recommended, since the USART3 pins are 5V tolerant.
 //   #define CONTROL_SERIAL_USART3
@@ -29,8 +27,7 @@
 #define SERIAL_BAUD         115200      // [-] Baud rate for built-in Serial (used for the Serial Monitor)
 #define START_FRAME         0xABCD     	// [-] Start frme definition for reliable serial communication
 #define TIME_SEND           100         // [ms] Sending time interval
-#define SPEED_MAX_TEST      300         // [-] Maximum speed for testing
-#define SPEED_STEP          20          // [-] Speed step
+#define SPEED_MAX_TEST      100         // [-] Maximum speed for testing
 // #define DEBUG_RX                        // [-] Debug received data. Prints all bytes to serial (comment-out to disable)
 
 #include <SoftwareSerial.h>
@@ -57,6 +54,8 @@ typedef struct{
    int16_t  cmd2;
    int16_t  speedR_meas;
    int16_t  speedL_meas;
+   int16_t  wheelR_cnt;
+   int16_t  wheelL_cnt;
    int16_t  batVoltage;
    int16_t  boardTemp;
    uint16_t cmdLed;
@@ -72,6 +71,7 @@ void setup()
   Serial.println("Hoverboard Serial v1.0");
 
   HoverSerial.begin(HOVER_SERIAL_BAUD);
+  
   pinMode(LED_BUILTIN, OUTPUT);
 }
 
@@ -85,7 +85,7 @@ void Send(int16_t uSteer, int16_t uSpeed)
   Command.checksum = (uint16_t)(Command.start ^ Command.steer ^ Command.speed);
 
   // Write to Serial
-  HoverSerial.write((uint8_t *) &Command, sizeof(Command)); 
+  HoverSerial.write((uint8_t *) &Command, sizeof(Command));
 }
 
 // ########################## RECEIVE ##########################
@@ -121,7 +121,7 @@ void Receive()
     if (idx == sizeof(SerialFeedback)) {
         uint16_t checksum;
         checksum = (uint16_t)(NewFeedback.start ^ NewFeedback.cmd1 ^ NewFeedback.cmd2 ^ NewFeedback.speedR_meas ^ NewFeedback.speedL_meas
-                            ^ NewFeedback.batVoltage ^ NewFeedback.boardTemp ^ NewFeedback.cmdLed);
+                            ^ NewFeedback.wheelR_cnt ^ NewFeedback.wheelL_cnt ^ NewFeedback.batVoltage ^ NewFeedback.boardTemp ^ NewFeedback.cmdLed);
 
         // Check validity of the new data
         if (NewFeedback.start == START_FRAME && checksum == NewFeedback.checksum) {
@@ -133,6 +133,8 @@ void Receive()
             Serial.print(" 2: ");  Serial.print(Feedback.cmd2);
             Serial.print(" 3: ");  Serial.print(Feedback.speedR_meas);
             Serial.print(" 4: ");  Serial.print(Feedback.speedL_meas);
+            Serial.print(" r: ");  Serial.print(Feedback.wheelR_cnt);
+            Serial.print(" l: ");  Serial.print(Feedback.wheelL_cnt);
             Serial.print(" 5: ");  Serial.print(Feedback.batVoltage);
             Serial.print(" 6: ");  Serial.print(Feedback.boardTemp);
             Serial.print(" 7: ");  Serial.println(Feedback.cmdLed);
@@ -149,8 +151,8 @@ void Receive()
 // ########################## LOOP ##########################
 
 unsigned long iTimeSend = 0;
+int iTestMax = SPEED_MAX_TEST;
 int iTest = 0;
-int iStep = SPEED_STEP;
 
 void loop(void)
 { 
@@ -162,14 +164,11 @@ void loop(void)
   // Send commands
   if (iTimeSend > timeNow) return;
   iTimeSend = timeNow + TIME_SEND;
-  Send(0, iTest);
-
+  Send(0, SPEED_MAX_TEST - 2*abs(iTest));
+  
   // Calculate test command signal
-  iTest += iStep;
-
-  // invert step if reaching limit
-  if (iTest >= SPEED_MAX_TEST || iTest <= -SPEED_MAX_TEST)
-    iStep = -iStep;
+  iTest += 1;
+  if (iTest > iTestMax) iTest = -iTestMax;
 
   // Blink the LED
   digitalWrite(LED_BUILTIN, (timeNow%2000)<1000);
